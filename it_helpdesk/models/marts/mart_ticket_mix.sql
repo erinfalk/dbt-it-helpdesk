@@ -1,5 +1,6 @@
 -- KPI: Ticket mix by severity & priority — shows workload risk profile
--- Uses canonical display labels (typo-corrected) and business tiers only
+-- Grain: severity × priority × is_resolved
+-- Additive: use SUM(ticket_count) / NULLIF(SUM(SUM(ticket_count)) OVER (), 0) for pct downstream
 with tickets as (
     select
         *,
@@ -24,8 +25,7 @@ select
     dp.business_tier as priority_tier,
     dp.sort_key as priority_sort,
     t.is_resolved,
-    count(*) as ticket_count,
-    round(count(*) * 100.0 / sum(count(*)) over (), 2) as pct_of_total
+    count(*) as ticket_count
 from tickets t
 left join dim_sev ds on t.severity_level = ds.sort_key
 left join dim_pri dp on t.priority_level = dp.sort_key

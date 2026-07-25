@@ -3,47 +3,50 @@ version: 2
 models:
   - name: mart_ticket_mix
     description: >
-      Ticket volume cross-tabulated by severity and priority with canonical display labels.
-      Grain: one row per (severity, priority, is_resolved) combination.
-      Use for heatmaps showing workload risk profile.
+      Ticket volume by severity × priority × resolution status.
+      Grain: (severity, priority, is_resolved).
+      Additive: calculate pct downstream as ticket_count / SUM(ticket_count) OVER ().
+    tests:
+      - unique:
+          column_name: "severity || '|' || priority || '|' || is_resolved"
     columns:
       - name: severity
-        description: "Corrected severity display label (Unclassified, Minor, Normal, Major, Urgent)"
+        description: "Corrected severity display label"
         tests:
           - not_null
           - accepted_values:
               values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
       - name: severity_tier
-        description: "Business-approved tier: Unknown, Low, Medium, High, Critical"
+        description: "Business tier: Unknown, Low, Medium, High, Critical"
         tests:
           - accepted_values:
               values: ['Unknown', 'Low', 'Medium', 'High', 'Critical']
       - name: severity_sort
-        description: "Numeric sort key (0–4) for ordering severity in charts"
+        description: "Numeric sort key (0–4)"
         tests:
           - not_null
       - name: priority
-        description: "Corrected priority display label (Unassigned, Low, Medium, High)"
+        description: "Corrected priority display label"
         tests:
           - not_null
           - accepted_values:
               values: ['Unassigned', 'Low', 'Medium', 'High']
       - name: priority_code
-        description: "Priority code: P1 (high), P2 (medium), P3 (low), P4 (unassigned)"
+        description: "P-code: P1 (high), P2 (medium), P3 (low), P4 (unassigned)"
         tests:
           - accepted_values:
               values: ['P1', 'P2', 'P3', 'P4']
       - name: priority_tier
-        description: "Business-approved tier: Unassigned, Low, Medium, High"
+        description: "Business tier: Unassigned, Low, Medium, High"
         tests:
           - accepted_values:
               values: ['Unassigned', 'Low', 'Medium', 'High']
       - name: priority_sort
-        description: "Numeric sort key (0–3) for ordering priority in charts"
+        description: "Numeric sort key (0–3)"
         tests:
           - not_null
       - name: is_resolved
-        description: "TRUE if ticket has been resolved (resolution_days IS NOT NULL), FALSE if open"
+        description: "TRUE = closed, FALSE = open"
         tests:
           - not_null
           - accepted_values:
@@ -52,17 +55,18 @@ models:
         description: "Number of tickets in this combination"
         tests:
           - not_null
-      - name: pct_of_total
-        description: "Percentage of all tickets falling into this combination"
+          - non_negative
 
   - name: mart_agent_throughput
     description: >
-      Weekly resolved-ticket count per support agent. Dense: every agent has a row
-      for every week in the data range (zero-filled). Grain: (agent_id, week_start).
-      Assumption: resolved = resolution_days IS NOT NULL.
+      Weekly resolved-ticket count per agent. Dense (zero-filled).
+      Grain: (agent_id, week_start).
+    tests:
+      - unique:
+          column_name: "agent_id || '|' || week_start"
     columns:
       - name: agent_id
-        description: "Agent identifier (FK to stg_agents)"
+        description: "Agent identifier"
         tests:
           - not_null
           - relationships:
@@ -70,27 +74,30 @@ models:
               field: agent_id
               severity: warn
       - name: agent_name
-        description: "Agent full name derived from email"
+        description: "Agent full name"
         tests:
           - not_null
       - name: week_start
-        description: "Monday of the ISO week"
+        description: "Monday of ISO week"
         tests:
           - not_null
       - name: tickets_resolved
-        description: "Count of tickets resolved that week (0 if none)"
+        description: "Count resolved that week (0 if none)"
         tests:
           - not_null
+          - non_negative
 
   - name: mart_resolution_time
     description: >
-      Resolution time statistics by issue type and request category (two-level hierarchy).
-      Grain: one row per (issue_type, request_category).
-      Only resolved tickets included. Median is the primary metric (right-skew resistant).
-      resolution_days = calendar days, not business days.
+      Resolution time percentiles by issue type × request category.
+      Grain: (issue_type, request_category).
+      Percentiles are not reaggregatable — consume at this grain only.
+    tests:
+      - unique:
+          column_name: "issue_type || '|' || request_category"
     columns:
       - name: issue_type
-        description: "Top-level category: IT Request, IT Error"
+        description: "Top-level: IT Request, IT Error"
         tests:
           - not_null
           - accepted_values:
@@ -102,118 +109,189 @@ models:
           - accepted_values:
               values: ['System', 'Hardware', 'Login Access', 'Software']
       - name: tickets_resolved
-        description: "Total resolved tickets for this type/category"
+        description: "Total resolved tickets at this grain"
         tests:
           - not_null
+          - non_negative
       - name: median_resolution_days
         description: "Median calendar days to resolve"
-      - name: avg_resolution_days
-        description: "Mean calendar days to resolve"
+        tests:
+          - non_negative
       - name: p75_resolution_days
         description: "75th percentile resolution days"
+        tests:
+          - non_negative
       - name: p95_resolution_days
         description: "95th percentile resolution days"
-      - name: min_resolution_days
-        description: "Fastest resolution (days)"
-      - name: max_resolution_days
-        description: "Slowest resolution (days)"
+        tests:
+          - non_negative
 
   - name: mart_sla_compliance
     description: >
-      SLA compliance rate per issue type per month. Dense: every issue type has a row
-      for every month (zero-filled). SLA definition: resolved within <= 3 calendar days.
-      Grain: (issue_type, month_start).
+      SLA compliance counts by month × issue type × request category × severity.
+      SLA = resolved within <= 3 calendar days (boundary-inclusive).
+      Grain: (month_start, issue_type, request_category, severity_tier).
+      Additive: calculate rate as 100 * SUM(tickets_within_sla) / NULLIF(SUM(resolved_ticket_count), 0).
+    tests:
+      - unique:
+          column_name: "month_start || '|' || issue_type || '|' || request_category || '|' || severity_tier"
     columns:
-      - name: issue_type
-        description: "Issue category"
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['IT Request', 'IT Error']
       - name: month_start
         description: "First day of calendar month"
         tests:
           - not_null
+      - name: issue_type
+        description: "IT Request or IT Error"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['IT Request', 'IT Error']
+      - name: request_category
+        description: "System, Hardware, Login Access, Software"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['System', 'Hardware', 'Login Access', 'Software']
+      - name: severity
+        description: "Corrected severity display label"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
+      - name: severity_tier
+        description: "Business tier: Unknown, Low, Medium, High, Critical"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unknown', 'Low', 'Medium', 'High', 'Critical']
+      - name: severity_sort
+        description: "Numeric sort key (0–4)"
+        tests:
+          - not_null
       - name: sla_target_days
-        description: "SLA threshold in calendar days (always 3). Exposed for downstream parameterization."
+        description: "SLA threshold (always 3). Exposed for downstream parameterization."
         tests:
           - not_null
           - accepted_values:
               values: [3]
       - name: resolved_ticket_count
-        description: "Total resolved tickets in this issue_type/month"
+        description: "Total resolved tickets at this grain (denominator)"
         tests:
           - not_null
+          - non_negative
       - name: tickets_within_sla
-        description: "Tickets resolved in <= 3 calendar days (boundary-inclusive: exactly 3 days = compliant)"
+        description: "Resolved in <= 3 days (numerator)"
         tests:
           - not_null
+          - non_negative
+          - numerator_lte_denominator:
+              denominator: resolved_ticket_count
       - name: tickets_breached_sla
-        description: "Tickets resolved in > 3 calendar days"
+        description: "Resolved in > 3 days"
         tests:
           - not_null
-      - name: sla_compliance_pct
-        description: "tickets_within_sla / resolved_ticket_count * 100. NULL when no resolved tickets."
-      - name: weighted_sla_compliance_pct
-        description: >
-          Contribution of this issue_type's compliant tickets to the overall monthly compliance.
-          Sum across issue types for a given month = overall monthly SLA compliance %.
+          - non_negative
+          - numerator_lte_denominator:
+              denominator: resolved_ticket_count
 
   - name: mart_csat_by_category
     description: >
-      Average customer satisfaction (1–5 scale) by request category.
-      Grain: one row per request_category. All-time aggregate.
-      Promoter = 4 or 5, Detractor = 1 or 2, Neutral = 3.
+      Customer satisfaction measures by request category.
+      Grain: (request_category).
+      Additive: overall CSAT = SUM(csat_points_sum) / NULLIF(SUM(responses), 0).
+      Promoter share = 100 * SUM(promoters) / NULLIF(SUM(responses), 0).
     columns:
       - name: request_category
-        description: "Request category (System, Hardware, Login Access, Software)"
+        description: "System, Hardware, Login Access, Software"
         tests:
           - unique
           - not_null
           - accepted_values:
               values: ['System', 'Hardware', 'Login Access', 'Software']
       - name: responses
-        description: "Number of tickets with a satisfaction rating"
+        description: "Tickets with a satisfaction rating (denominator)"
         tests:
           - not_null
+          - non_negative
+      - name: csat_points_sum
+        description: "SUM(satisfaction_rate). Divide by responses for avg CSAT."
+        tests:
+          - not_null
+          - non_negative
       - name: avg_csat
-        description: "Mean satisfaction_rate (1–5)"
+        description: "Mean satisfaction_rate (1–5) at this grain. Use csat_points_sum/responses for roll-ups."
+        tests:
+          - not_null
       - name: promoters
-        description: "Count of ratings >= 4"
+        description: "Count of scores >= 4 (numerator for promoter share)"
+        tests:
+          - not_null
+          - non_negative
+          - numerator_lte_denominator:
+              denominator: responses
       - name: detractors
-        description: "Count of ratings <= 2"
-      - name: pct_promoters
-        description: "Percentage of respondents scoring 4 or 5"
+        description: "Count of scores <= 2"
+        tests:
+          - not_null
+          - non_negative
+          - numerator_lte_denominator:
+              denominator: responses
 
   - name: mart_first_week_resolution_rate
     description: >
-      Monthly percentage of tickets resolved within 7 calendar days.
-      Dense: every month in the data range has a row (zero-filled).
-      Grain: one row per month_start.
+      First-week (7-day) resolution counts by month × request category × severity.
+      Grain: (month_start, request_category, severity_tier).
+      Additive: calculate rate as 100 * SUM(resolved_within_7_days) / NULLIF(SUM(total_resolved), 0).
+    tests:
+      - unique:
+          column_name: "month_start || '|' || request_category || '|' || severity_tier"
     columns:
       - name: month_start
-        description: "First day of the calendar month"
+        description: "First day of calendar month"
         tests:
-          - unique
+          - not_null
+      - name: request_category
+        description: "System, Hardware, Login Access, Software"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['System', 'Hardware', 'Login Access', 'Software']
+      - name: severity
+        description: "Corrected severity display label"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
+      - name: severity_tier
+        description: "Business tier: Unknown, Low, Medium, High, Critical"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unknown', 'Low', 'Medium', 'High', 'Critical']
+      - name: severity_sort
+        description: "Numeric sort key (0–4)"
+        tests:
           - not_null
       - name: total_resolved
-        description: "All resolved tickets in that month"
+        description: "All resolved tickets at this grain (denominator)"
         tests:
           - not_null
+          - non_negative
       - name: resolved_within_7_days
-        description: "Tickets resolved in <= 7 calendar days"
+        description: "Resolved in <= 7 days (numerator)"
         tests:
           - not_null
-      - name: first_week_resolution_pct
-        description: "Percentage resolved within 7 days. NULL if total_resolved = 0."
+          - non_negative
+          - numerator_lte_denominator:
+              denominator: total_resolved
 
 exposures:
   - name: it_helpdesk_operations_dashboard
     type: dashboard
     maturity: medium
     description: >
-      IT Helpdesk Operations Dashboard in Hex. Visualizes ticket mix, agent throughput,
-      resolution times, SLA compliance, CSAT, and first-week resolution rate.
+      IT Helpdesk Operations Dashboard in Hex. All marts expose additive
+      numerators and denominators — rates must be computed downstream.
       Connected via HEX_READER role on DEV_MARTS.IT_HELPDESK.
     depends_on:
       - ref('mart_ticket_mix')

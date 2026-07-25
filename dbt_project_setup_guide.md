@@ -68,10 +68,11 @@ it_helpdesk/
 ├── macros/
 │   ├── generate_schema_name.sql
 │   ├── test_matches_email_format.sql
-│   ├── test_valid_date_of_birth.sql
-│   ├── test_valid_level_label_pairs.sql
+│   ├── test_non_negative.sql
 │   ├── test_not_in_future.sql
-│   └── test_non_negative.sql
+│   ├── test_numerator_lte_denominator.sql
+│   ├── test_valid_date_of_birth.sql
+│   └── test_valid_level_label_pairs.sql
 └── models/
     ├── sources.yml
     ├── staging/
@@ -93,7 +94,6 @@ it_helpdesk/
         ├── mart_resolution_time.sql
         ├── mart_sla_compliance.sql
         ├── mart_csat_by_category.sql
-        ├── mart_backlog_trend.sql
         └── mart_first_week_resolution_rate.sql
 ```
 
@@ -104,7 +104,7 @@ it_helpdesk/
 | `staging/` | View | DEV_STAGE | Light renaming, type casting, no business logic |
 | `intermediate/` | View | DEV_STAGE | Reusable utilities (date spine) — not consumer-facing |
 | `dims/` | Table | DEV_MARTS | Canonical dimensions with corrected labels and business mappings |
-| `marts/` | Table | DEV_MARTS | Pre-aggregated KPI tables, one per business question |
+| `marts/` | Table | DEV_MARTS | KPI tables with additive measures (counts/sums only, no pre-computed rates) |
 
 ### Key dbt Configuration
 
@@ -155,9 +155,10 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 | **Resolved ticket** | `resolution_days IS NOT NULL`. Tickets with NULL resolution are open/unresolved. |
 | **Week** | ISO week via `DATE_TRUNC('week', ticket_date)`. Week starts on Monday. |
 | **Month** | Calendar month via `DATE_TRUNC('month', ticket_date)`. |
-| **Date spine** | All time-series marts are zero-filled using `int_date_spine`. Periods with no activity show as 0, not as missing rows. |
+| **Date spine** | `mart_agent_throughput` is zero-filled via `int_date_spine`. Other marts are not spine-filled (their grains are multi-dimensional). |
 | **Date range** | Dynamically bounded by `MIN(ticket_date)` to `MAX(ticket_date)`. Currently 2016-01-01 through 2020-12-31. Auto-extends with new data. |
 | **Labels in marts** | Only corrected display labels appear. Raw/misspelled source labels are confined to staging and dims. |
+| **Additive measures only** | Marts expose counts and sums only — no pre-computed percentages. Rates must be calculated downstream as `100 * SUM(numerator) / NULLIF(SUM(denominator), 0)`. This ensures correct results under any filter or roll-up. |
 
 ---
 
@@ -176,11 +177,10 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 | `priority_tier` | Business tier |
 | `priority_sort` | Numeric key (0–3) for chart ordering |
 | `is_resolved` | TRUE = closed, FALSE = open — use as filter in Hex |
-| `ticket_count` | Tickets in this combination |
-| `pct_of_total` | Percentage of all tickets |
+| `ticket_count` | Tickets in this combination (additive) |
 
 **Grain:** One row per (severity, priority, is_resolved).
-**Hex usage:** Filter `WHERE is_resolved = FALSE` for open-ticket view; omit filter for all tickets.
+**Hex usage:** Filter `WHERE is_resolved = FALSE` for open-ticket view. Calculate pct downstream: `100.0 * ticket_count / NULLIF(SUM(ticket_count) OVER (), 0)`.
 
 ---
 
@@ -212,39 +212,39 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 | `request_category` | Sub-category: System, Hardware, Login Access, Software |
 | `tickets_resolved` | Total resolved tickets |
 | `median_resolution_days` | Median calendar days to resolve |
-| `avg_resolution_days` | Mean calendar days |
 | `p75_resolution_days` | 75th percentile |
 | `p95_resolution_days` | 95th percentile |
-| `min_resolution_days` | Fastest resolution |
-| `max_resolution_days` | Slowest resolution |
 
 **Grain:** One row per (issue_type, request_category) — 8 rows total.
-**Assumptions:** Calendar days, not business days. Median is primary (skew-resistant).
+**Assumptions:** Calendar days, not business days. Median is primary (skew-resistant). Percentiles are **not reaggregatable** — consume at this grain only.
 
 ---
 
 ### KPI 4: SLA Compliance Rate
 
 **Model:** `mart_sla_compliance`
-**Business question:** What % of tickets meet the 3-day SLA, trending over time?
+**Business question:** What % of tickets meet the 3-day SLA, drillable by category and severity?
 
 | Column | Description |
 |--------|-------------|
-| `issue_type` | Issue category |
 | `month_start` | First day of month |
+| `issue_type` | IT Request or IT Error |
+| `request_category` | System, Hardware, Login Access, Software |
+| `severity` | Corrected display label |
+| `severity_tier` | Business tier |
+| `severity_sort` | Numeric sort key (0–4) |
 | `sla_target_days` | Always 3 — exposed for downstream parameterization |
-| `resolved_ticket_count` | Resolved tickets in this cell |
-| `tickets_within_sla` | Resolved in ≤ 3 days (boundary-inclusive) |
+| `resolved_ticket_count` | Total resolved at this grain (denominator) |
+| `tickets_within_sla` | Resolved in ≤ 3 days (numerator) |
 | `tickets_breached_sla` | Resolved in > 3 days |
-| `sla_compliance_pct` | % meeting SLA (NULL if no resolved tickets) |
-| `weighted_sla_compliance_pct` | Contribution to overall monthly compliance |
 
-**Grain:** One row per (issue_type, month). Dense.
-**Assumptions:** SLA = ≤ 3 calendar days. Exactly 3 days = compliant. NULL pct for empty periods (not 0% or 100%).
+**Grain:** One row per (month_start, issue_type, request_category, severity_tier).
+**Assumptions:** SLA = ≤ 3 calendar days. Exactly 3 days = compliant.
+**Hex usage:** Roll up with `SUM()` for any slice: `100 * SUM(tickets_within_sla) / NULLIF(SUM(resolved_ticket_count), 0)`.
 
 ---
 
-### KPI 5: Average CSAT by Request Category
+### KPI 5: CSAT by Request Category
 
 **Model:** `mart_csat_by_category`
 **Business question:** Which service areas have the happiest/unhappiest users?
@@ -252,50 +252,34 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 | Column | Description |
 |--------|-------------|
 | `request_category` | System, Hardware, Login Access, Software |
-| `responses` | Tickets with a satisfaction rating |
-| `avg_csat` | Mean score (1–5 scale) |
-| `promoters` | Count of scores ≥ 4 |
+| `responses` | Tickets with a satisfaction rating (denominator) |
+| `csat_points_sum` | SUM(satisfaction_rate) — divide by responses for exact avg |
+| `avg_csat` | Mean score at this grain (1–5) — use csat_points_sum for roll-ups |
+| `promoters` | Count of scores ≥ 4 (numerator for promoter share) |
 | `detractors` | Count of scores ≤ 2 |
-| `pct_promoters` | % scoring 4 or 5 |
 
 **Grain:** One row per request_category. All-time aggregate.
+**Hex usage:** Overall CSAT = `SUM(csat_points_sum) / NULLIF(SUM(responses), 0)`. Promoter share = `100 * SUM(promoters) / NULLIF(SUM(responses), 0)`.
 
 ---
 
-### KPI 6: Backlog Trend
-
-**Model:** `mart_backlog_trend`
-**Business question:** Is the team keeping up or falling behind?
-
-| Column | Description |
-|--------|-------------|
-| `week_start` | Monday of the ISO week |
-| `severity` | Corrected display label |
-| `severity_tier` | Business tier |
-| `severity_sort` | Numeric key for ordering |
-| `tickets_opened` | Opened that week (0 if none) |
-| `tickets_resolved` | Resolved that week (0 if none) |
-| `net_new_backlog` | opened − resolved (positive = falling behind) |
-| `cumulative_backlog` | Running sum within each severity |
-
-**Grain:** One row per (week, severity). Dense.
-**Assumptions:** Both opened/resolved attributed to `ticket_date`. Cumulative can go negative (team catching up).
-
----
-
-### KPI 7: First-Week Resolution Rate
+### KPI 6: First-Week Resolution Rate
 
 **Model:** `mart_first_week_resolution_rate`
-**Business question:** What % of tickets are resolved within 7 days?
+**Business question:** What % of tickets are resolved within 7 days, drillable by category and severity?
 
 | Column | Description |
 |--------|-------------|
 | `month_start` | First day of month |
-| `total_resolved` | All resolved tickets that month |
-| `resolved_within_7_days` | Resolved in ≤ 7 days |
-| `first_week_resolution_pct` | Percentage (NULL if no resolutions) |
+| `request_category` | System, Hardware, Login Access, Software |
+| `severity` | Corrected display label |
+| `severity_tier` | Business tier |
+| `severity_sort` | Numeric sort key (0–4) |
+| `total_resolved` | All resolved tickets at this grain (denominator) |
+| `resolved_within_7_days` | Resolved in ≤ 7 days (numerator) |
 
-**Grain:** One row per month. Dense.
+**Grain:** One row per (month_start, request_category, severity_tier).
+**Hex usage:** Roll up with `SUM()`: `100 * SUM(resolved_within_7_days) / NULLIF(SUM(total_resolved), 0)`.
 
 ---
 
@@ -303,7 +287,7 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 
 ### int_date_spine
 
-Generates every ISO week from `MIN(ticket_date)` to `MAX(ticket_date)` using Snowflake's `ARRAY_GENERATE_RANGE`. Also derives `month_start`. Materialized as a view (no storage cost). Used by all four time-series marts to cross-join with dimension values and produce zero-filled dense output.
+Generates every ISO week from `MIN(ticket_date)` to `MAX(ticket_date)` using Snowflake's `ARRAY_GENERATE_RANGE`. Also derives `month_start`. Materialized as a view (no storage cost). Used by `mart_agent_throughput` for zero-filled dense output.
 
 The spine is dynamic — extends automatically as new ticket data arrives.
 
@@ -336,19 +320,85 @@ Then apply via `Setup.sql` Section 5d. Upload `hex_rsa_key.p8` to Hex's connecti
 
 ### Usage in Hex
 
-Each mart is pre-aggregated — `SELECT *` and chart directly:
+Marts expose additive measures. Calculate rates downstream:
 
 ```sql
-SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_TICKET_MIX;
-SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_AGENT_THROUGHPUT WHERE week_start >= '2020-01-01';
-SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_SLA_COMPLIANCE;
+-- Overall SLA compliance
+SELECT month_start,
+       100 * SUM(tickets_within_sla) / NULLIF(SUM(resolved_ticket_count), 0) AS sla_pct
+FROM DEV_MARTS.IT_HELPDESK.MART_SLA_COMPLIANCE
+GROUP BY 1 ORDER BY 1;
+
+-- First-week rate by severity
+SELECT month_start, severity_tier,
+       100 * SUM(resolved_within_7_days) / NULLIF(SUM(total_resolved), 0) AS first_week_pct
+FROM DEV_MARTS.IT_HELPDESK.MART_FIRST_WEEK_RESOLUTION_RATE
+GROUP BY 1, 2;
+
+-- Ticket mix with computed pct
+SELECT severity, priority, ticket_count,
+       100.0 * ticket_count / NULLIF(SUM(ticket_count) OVER (), 0) AS pct_of_total
+FROM DEV_MARTS.IT_HELPDESK.MART_TICKET_MIX
+WHERE is_resolved = TRUE;
 ```
 
-Use Hex input parameters (dropdowns) bound to `WHERE` clauses for interactive filtering (e.g., `is_resolved`, date ranges, agent selection).
+Use Hex input parameters (dropdowns) bound to `WHERE` clauses for interactive filtering (e.g., `is_resolved`, date ranges, severity_tier, request_category).
 
 ### Schema Discoverability
 
 `persist_docs` is enabled — all model and column descriptions from `_schema.yml` appear as Snowflake `COMMENT` metadata, visible in Hex's schema browser without referencing the dbt project.
+
+---
+
+## Hex Dashboard: IT Helpdesk Operations
+
+A shareable Hex Generative app was built on top of the dbt marts. It is currently an unpublished draft pending final review and publishing permissions.
+
+### KPI Views
+
+**1. Ticket mix by severity and priority**
+- Heatmap of ticket counts by canonical severity (Critical → Unknown) and priority (P1 High → P4 Unassigned).
+- Notebook input toggles All / Open / Resolved. The current dataset contains no open tickets, so the Open view is empty — retained because it would be operationally important with live data.
+- Percentages are calculated in Hex from additive ticket counts within the active filter context.
+
+**2. Tickets resolved per agent**
+- Weekly agent throughput at the agent_id × week_start grain.
+- Agents ranked highest to lowest by total tickets resolved across the full period.
+- Total resolved, rank, and weekly averages are presentation-level aggregations calculated in the notebook.
+
+**3. Resolution time by issue type and request category**
+- Uses the issue_type × request_category grain (8 rows).
+- Median is the primary measure (right-skew resistant). P75 and P95 show the slower tail.
+- Hardware requests are the slowest category in the current data.
+
+**4. SLA compliance**
+- Defined as resolved within 3 calendar days (boundary-inclusive: exactly 3 days = compliant).
+- Hex calculates: `100 * SUM(tickets_within_sla) / SUM(resolved_ticket_count)`.
+- Default view: overall monthly trend. Optional breakouts by request category and severity.
+- Category identifies work types causing breaches; severity shows whether high-risk tickets receive appropriate service.
+
+**5. Customer satisfaction**
+- Overall CSAT: `SUM(csat_points_sum) / SUM(responses)`.
+- Share rating 4–5: `100 * SUM(promoters) / SUM(responses)`.
+- CSAT averages vary only 4.09–4.11 across request categories (differences negligible), so CSAT is presented as an overall outcome KPI rather than a category comparison.
+- Response count retained to communicate sample size.
+
+**6. First-week resolution**
+- Defined as resolved within 7 calendar days.
+- Hex calculates: `100 * SUM(resolved_within_7_days) / SUM(total_resolved)`.
+- Default view: overall monthly trend. Request-category breakout is the more diagnostic dimension (reveals structural complexity differences). Severity breakout also available.
+- Overall rate is stable (~75.8%–79.0%) — main value is monitoring consistency and detecting future deviations.
+
+### Dashboard Design Principles
+
+- Overall trends shown by default; breakouts exposed through interactive controls to avoid cluttered multi-series charts.
+- All rates calculated from additive counts in Hex, ensuring correct totals under any filter combination.
+- Labels, units, tooltips, and calendar-day definitions retained where they help interpretation.
+- Canonical display labels, P-codes, tiers, and sort keys come from dbt (stable business definitions, not presentation logic).
+
+### Backlog Trend (Not Included)
+
+Explored but not added. The mart's logic attributed both opened and resolved tickets to the opening date, making net/cumulative backlog always zero. A useful backlog model would require closure-week attribution or periodic open-ticket snapshots. The mart was removed from dbt.
 
 ---
 
@@ -357,9 +407,10 @@ Use Hex input parameters (dropdowns) bound to `WHERE` clauses for interactive fi
 | Decision | Rationale |
 |----------|-----------|
 | One model per KPI | Each mart answers one business question — easy to reason about, test, and document |
-| Pre-aggregated grain | Hex consumers do `SELECT *` and chart — no SQL expertise required |
-| Dense time-series (date spine) | Eliminates gaps in charts without Hex-side pandas transforms |
-| NULL percentages for empty periods | Avoids misleading 0%/100% — Hex chart libraries skip NULLs gracefully |
+| Additive measures only | No pre-computed percentages — rates calculated downstream so filters/roll-ups are always correct |
+| Multi-dimensional grains | SLA and first-week marts sliceable by severity/category without re-querying staging |
+| Dense agent throughput | Date spine on the single agent×week mart; other marts don't need it (no expected gaps given their granularity) |
+| Percentiles not reaggregatable | Resolution time mart is consumed at grain only — noted in docs to prevent incorrect roll-ups |
 | Display labels only in marts | Raw source typos confined to staging/dims — consumers never see them |
 | Canonical dims as tables | Materialized for join performance; persist_docs makes mappings discoverable in Hex |
 | persist_docs enabled | Column descriptions visible in BI tool schema browsers without dbt project access |
