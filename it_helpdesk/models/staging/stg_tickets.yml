@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: stg_tickets
+    columns:
+      - name: ticket_id
+        tests:
+          - unique
+          - not_null
+      - name: agent_id
+        tests:
+          - relationships:
+              to: ref('stg_agents')
+              field: agent_id
+              severity: warn
+      - name: ticket_date
+        tests:
+          - not_in_future
+      - name: satisfaction_rate
+        tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+      - name: resolution_days
+        tests:
+          - non_negative
+      - name: priority_label
+        tests:
+          - valid_level_label_pairs:
+              level_column: priority_level
+              valid_pairs:
+                - { level: 0, label: "Unassiged" }
+                - { level: 1, label: "Low" }
+                - { level: 2, label: "Mid" }
+                - { level: 3, label: "High" }
+      - name: severity_label
+        tests:
+          - valid_level_label_pairs:
+              level_column: severity_level
+              valid_pairs:
+                - { level: 0, label: "Unclasified" }
+                - { level: 1, label: "Minor" }
+                - { level: 2, label: "Normal" }
+                - { level: 3, label: "Mayor" }
+                - { level: 4, label: "Urgent" }
