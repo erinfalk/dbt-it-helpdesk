@@ -350,6 +350,58 @@ Use Hex input parameters (dropdowns) bound to `WHERE` clauses for interactive fi
 
 ---
 
+## Hex Dashboard: IT Helpdesk Operations
+
+A shareable Hex Generative app was built on top of the dbt marts. It is currently an unpublished draft pending final review and publishing permissions.
+
+### KPI Views
+
+**1. Ticket mix by severity and priority**
+- Heatmap of ticket counts by canonical severity (Critical → Unknown) and priority (P1 High → P4 Unassigned).
+- Notebook input toggles All / Open / Resolved. The current dataset contains no open tickets, so the Open view is empty — retained because it would be operationally important with live data.
+- Percentages are calculated in Hex from additive ticket counts within the active filter context.
+
+**2. Tickets resolved per agent**
+- Weekly agent throughput at the agent_id × week_start grain.
+- Agents ranked highest to lowest by total tickets resolved across the full period.
+- Total resolved, rank, and weekly averages are presentation-level aggregations calculated in the notebook.
+
+**3. Resolution time by issue type and request category**
+- Uses the issue_type × request_category grain (8 rows).
+- Median is the primary measure (right-skew resistant). P75 and P95 show the slower tail.
+- Hardware requests are the slowest category in the current data.
+
+**4. SLA compliance**
+- Defined as resolved within 3 calendar days (boundary-inclusive: exactly 3 days = compliant).
+- Hex calculates: `100 * SUM(tickets_within_sla) / SUM(resolved_ticket_count)`.
+- Default view: overall monthly trend. Optional breakouts by request category and severity.
+- Category identifies work types causing breaches; severity shows whether high-risk tickets receive appropriate service.
+
+**5. Customer satisfaction**
+- Overall CSAT: `SUM(csat_points_sum) / SUM(responses)`.
+- Share rating 4–5: `100 * SUM(promoters) / SUM(responses)`.
+- CSAT averages vary only 4.09–4.11 across request categories (differences negligible), so CSAT is presented as an overall outcome KPI rather than a category comparison.
+- Response count retained to communicate sample size.
+
+**6. First-week resolution**
+- Defined as resolved within 7 calendar days.
+- Hex calculates: `100 * SUM(resolved_within_7_days) / SUM(total_resolved)`.
+- Default view: overall monthly trend. Request-category breakout is the more diagnostic dimension (reveals structural complexity differences). Severity breakout also available.
+- Overall rate is stable (~75.8%–79.0%) — main value is monitoring consistency and detecting future deviations.
+
+### Dashboard Design Principles
+
+- Overall trends shown by default; breakouts exposed through interactive controls to avoid cluttered multi-series charts.
+- All rates calculated from additive counts in Hex, ensuring correct totals under any filter combination.
+- Labels, units, tooltips, and calendar-day definitions retained where they help interpretation.
+- Canonical display labels, P-codes, tiers, and sort keys come from dbt (stable business definitions, not presentation logic).
+
+### Backlog Trend (Not Included)
+
+Explored but not added. The mart's logic attributed both opened and resolved tickets to the opening date, making net/cumulative backlog always zero. A useful backlog model would require closure-week attribution or periodic open-ticket snapshots. The mart was removed from dbt.
+
+---
+
 ## Design Decisions
 
 | Decision | Rationale |
