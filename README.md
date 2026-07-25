@@ -79,11 +79,13 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 ## Next Steps
 
 **Technical:**
+
 1. Set up prod schemas and a proper deployment process in Snowflake/dbt (separate from the dev setup in `Setup.sql`).
 2. Schedule the dbt job to run on a frequency aligned with how often the source data actually updates.
 3. Move to schema-level role-based access control — read/write access roles per schema, granted to functional roles/service accounts, rather than grants sitting directly on users/accounts.
 
 **Business/process:**
+
 4. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
 5. Revisit the SLA policy with severity-differentiated targets — Minor-severity tickets currently show *higher* SLA compliance than Urgent ones, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
 6. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
