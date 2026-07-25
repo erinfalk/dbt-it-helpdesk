@@ -1,4 +1,4 @@
-# IT Helpdesk dbt Project Setup Guide
+# IT Helpdesk End-to-End Project Setup Guide
 
 ## Architecture Overview
 
