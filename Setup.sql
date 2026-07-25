@@ -38,3 +38,6 @@ GRANT SELECT ON FUTURE TABLES IN SCHEMA DEV_SOURCE.IT_HELPDESK TO ROLE ACCOUNTAD
 -- 8. Check data landed by Fivetran
 SELECT * FROM DEV_SOURCE.IT_HELPDESK.TICKETS; -- 97,498 rows, matches spreadsheet
 SELECT * FROM DEV_SOURCE.IT_HELPDESK.AGENTS; -- 50 rows, matches spreadsheet
+
+-- set up Hex service account
+ALTER USER HEX SET RSA_PUBLIC_KEY = 'XXXXX';

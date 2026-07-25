@@ -459,9 +459,279 @@ it_helpdesk/
 │   └── test_non_negative.sql
 └── models/
     ├── sources.yml
-    └── staging/
-        ├── stg_agents.sql
-        ├── stg_agents.yml
-        ├── stg_tickets.sql
-        └── stg_tickets.yml
+    ├── staging/
+    │   ├── stg_agents.sql
+    │   ├── stg_agents.yml
+    │   ├── stg_tickets.sql
+    │   └── stg_tickets.yml
+    ├── intermediate/
+    │   └── int_date_spine.sql
+    └── marts/
+        ├── _schema.yml
+        ├── mart_ticket_mix.sql
+        ├── mart_agent_throughput.sql
+        ├── mart_resolution_time.sql
+        ├── mart_sla_compliance.sql
+        ├── mart_csat_by_category.sql
+        ├── mart_backlog_trend.sql
+        └── mart_first_week_resolution_rate.sql
 ```
+
+---
+
+## Mart Layer: KPI Definitions & Assumptions
+
+The mart layer materializes as **tables** in `DEV_MARTS.IT_HELPDESK`. Each model is pre-aggregated at a Hex-friendly grain — consumers should be able to `SELECT *` and chart directly without additional joins or transformations.
+
+### Global Assumptions
+
+| Assumption | Definition |
+|------------|------------|
+| **Resolved ticket** | A ticket where `resolution_days IS NOT NULL`. Tickets with NULL resolution are considered open/unresolved. |
+| **Week** | ISO week via `DATE_TRUNC('week', ticket_date)`. Week starts on Monday. |
+| **Month** | Calendar month via `DATE_TRUNC('month', ticket_date)`. |
+| **Date spine** | All time-series marts are zero-filled using `int_date_spine`, which generates every week from the earliest to latest `ticket_date` in the source data. This eliminates gaps in charts — periods with no activity show as 0, not as missing rows. |
+| **Date range** | The spine is dynamically bounded by `MIN(ticket_date)` to `MAX(ticket_date)` from `stg_tickets`. Currently 2016-01-01 through 2020-12-31. It will auto-extend as new data arrives. |
+
+---
+
+### KPI 1: Ticket Mix by Severity & Priority
+
+**Model:** `mart_ticket_mix`
+**Business question:** What is the workload risk profile? Where are tickets concentrated across the severity/priority matrix?
+
+| Column | Description |
+|--------|-------------|
+| `severity_label` | Severity bucket (Unclasified, Minor, Normal, Mayor, Urgent) |
+| `severity_level` | Numeric severity (0–4) for sort order |
+| `priority_label` | Priority bucket (Unassiged, Low, Mid, High) |
+| `priority_level` | Numeric priority (0–3) for sort order |
+| `ticket_count` | Number of tickets in this combination |
+| `pct_of_total` | Percentage of all tickets falling into this cell |
+
+**Grain:** One row per (severity_label, priority_label) combination.
+**Assumptions:** Counts all tickets regardless of resolution status. Not time-series — represents the full historical distribution.
+**Suggested Hex chart:** Heatmap with severity on Y-axis, priority on X-axis, colored by ticket_count.
+
+---
+
+### KPI 2: Tickets Resolved per Agent per Week
+
+**Model:** `mart_agent_throughput`
+**Business question:** How productive is each agent over time? Are there capacity imbalances?
+
+| Column | Description |
+|--------|-------------|
+| `agent_id` | Agent identifier |
+| `agent_name` | Full name (derived from email) |
+| `week_start` | Monday of the ISO week |
+| `tickets_resolved` | Count of tickets resolved that week (0 if none) |
+
+**Grain:** One row per (agent, week). Dense — every agent has a row for every week in the data range.
+**Assumptions:**
+- "Resolved" = `resolution_days IS NOT NULL`
+- Week is assigned based on `ticket_date`, not the date the ticket was actually closed (resolution date is not available in source)
+- Agents with zero resolutions in a week still appear (value = 0)
+
+**Suggested Hex chart:** Line chart per agent, or bar chart with agent on X-axis and avg weekly throughput.
+
+---
+
+### KPI 3: Median Resolution Time by Issue Type
+
+**Model:** `mart_resolution_time`
+**Business question:** Which issue categories are slowest to resolve?
+
+| Column | Description |
+|--------|-------------|
+| `issue_type` | The issue category (e.g., "IT Request", "IT Error") |
+| `tickets_resolved` | Total resolved tickets for this type |
+| `median_resolution_days` | Median days to resolve |
+| `avg_resolution_days` | Mean days to resolve |
+| `min_resolution_days` | Fastest resolution |
+| `max_resolution_days` | Slowest resolution |
+
+**Grain:** One row per issue_type. Not time-series.
+**Assumptions:**
+- Only resolved tickets are included (NULL resolution_days excluded)
+- Median is used as the primary metric because resolution time distributions are typically right-skewed (a few very long tickets inflate the mean)
+- `resolution_days` represents calendar days, not business days
+
+**Suggested Hex chart:** Horizontal bar chart sorted by median_resolution_days descending.
+
+---
+
+### KPI 4: SLA Compliance Rate
+
+**Model:** `mart_sla_compliance`
+**Business question:** What percentage of tickets meet the 3-day resolution SLA, and how does it trend over time by issue type?
+
+| Column | Description |
+|--------|-------------|
+| `issue_type` | The issue category |
+| `month_start` | First day of the calendar month |
+| `total_tickets` | Resolved tickets in this issue_type/month (0 if none) |
+| `tickets_within_sla` | Tickets resolved in ≤ 3 calendar days |
+| `sla_compliance_pct` | Percentage meeting SLA (NULL if total_tickets = 0) |
+
+**Grain:** One row per (issue_type, month). Dense — every issue type has a row for every month.
+**Assumptions:**
+- **SLA threshold: ≤ 3 calendar days.** This is a hardcoded business rule. If your SLA definition changes, update the `<= 3` condition in the model.
+- Only resolved tickets count toward compliance (open tickets are excluded, not counted as breaches)
+- Months with zero resolved tickets for an issue type show `sla_compliance_pct = NULL` (not 0% or 100%) to avoid misleading charts
+- Calendar days, not business days
+
+**Suggested Hex chart:** Line chart with month on X-axis, one series per issue_type, Y-axis = sla_compliance_pct.
+
+---
+
+### KPI 5: Average CSAT by Request Category
+
+**Model:** `mart_csat_by_category`
+**Business question:** Which service areas have the happiest/unhappiest users?
+
+| Column | Description |
+|--------|-------------|
+| `request_category` | The request category (e.g., "System", "Hardware") |
+| `responses` | Number of tickets with a satisfaction rating |
+| `avg_csat` | Mean satisfaction score (1–5 scale) |
+| `promoters` | Count of ratings ≥ 4 |
+| `detractors` | Count of ratings ≤ 2 |
+| `pct_promoters` | Percentage of responses that are promoters |
+
+**Grain:** One row per request_category. Not time-series.
+**Assumptions:**
+- Only tickets with `satisfaction_rate IS NOT NULL` are included
+- Promoter = score of 4 or 5; Detractor = score of 1 or 2; Neutral = 3
+- This is an all-time aggregate — no time dimension. Filter by date in Hex if trending is needed.
+
+**Suggested Hex chart:** Bar chart sorted by avg_csat, with a reference line at 3.0 (neutral).
+
+---
+
+### KPI 6: Backlog Trend
+
+**Model:** `mart_backlog_trend`
+**Business question:** Is the team keeping up with incoming volume, or is backlog growing?
+
+| Column | Description |
+|--------|-------------|
+| `week_start` | Monday of the ISO week |
+| `severity_label` | Severity bucket |
+| `tickets_opened` | Tickets opened that week (0 if none) |
+| `tickets_resolved` | Tickets resolved that week (0 if none) |
+| `net_new_backlog` | opened − resolved for the week (positive = falling behind) |
+| `cumulative_backlog` | Running sum of net_new_backlog within each severity |
+
+**Grain:** One row per (week, severity_label). Dense — every severity has a row for every week.
+**Assumptions:**
+- "Opened" = ticket exists with that `ticket_date` in the given week
+- "Resolved" = `resolution_days IS NOT NULL` for that ticket
+- Both opened and resolved are attributed to `ticket_date` (the open date), not the actual closure date — this is a limitation of the source data
+- `cumulative_backlog` can go negative if more tickets are resolved (from prior weeks) than opened in early periods. This is expected and represents the team catching up.
+
+**Suggested Hex chart:** Stacked area chart with week on X-axis, cumulative_backlog on Y-axis, colored by severity.
+
+---
+
+### KPI 7: First-Week Resolution Rate
+
+**Model:** `mart_first_week_resolution_rate`
+**Business question:** What percentage of tickets are resolved within 7 days? Is operational agility improving over time?
+
+| Column | Description |
+|--------|-------------|
+| `month_start` | First day of the calendar month |
+| `total_resolved` | All resolved tickets in that month (0 if none) |
+| `resolved_within_7_days` | Tickets resolved in ≤ 7 days |
+| `first_week_resolution_pct` | Percentage (NULL if total_resolved = 0) |
+
+**Grain:** One row per month. Dense — every month in the data range has a row.
+**Assumptions:**
+- Threshold: ≤ 7 calendar days
+- Only resolved tickets are in scope
+- Months with zero resolutions show NULL percentage (same rationale as SLA compliance)
+
+**Suggested Hex chart:** Line chart with month on X-axis, pct on Y-axis, with a target line at your team's goal (e.g., 80%).
+
+---
+
+## Intermediate Layer: Date Spine
+
+**Model:** `int_date_spine`
+**Materialization:** View in `DEV_STAGE.IT_HELPDESK`
+
+Generates a complete series of ISO weeks from `MIN(ticket_date)` to `MAX(ticket_date)` in `stg_tickets`. Also derives `month_start` for monthly marts. Used by the four time-series marts to cross-join with dimension values and ensure zero-filled output.
+
+The spine is dynamic — as new ticket data arrives with later dates, the spine extends automatically on next `dbt run`.
+
+---
+
+## Hex Integration
+
+### Snowflake Connection Settings
+
+| Setting | Value |
+|---------|-------|
+| Account | `ztc28823` |
+| Username | `HEX` (service user, key-pair auth) |
+| Role | `HEX_READER` |
+| Warehouse | `HEX_WH` (XS, auto-suspend 60s) |
+| Database | `DEV_MARTS` |
+| Schema | `IT_HELPDESK` |
+
+### Access Model
+
+- **`HEX_READER` role** — read-only, SELECT on all current and future tables in `DEV_MARTS.IT_HELPDESK`
+- **`HEX_WH` warehouse** — dedicated XS warehouse for Hex queries, isolated from dbt execution on `COMPUTE_WH`
+- **`HEX` user** — service account with key-pair authentication; no password
+
+### Generating the Key Pair
+
+```bash
+# Generate private key (run on your local machine, not in Snowflake)
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out hex_rsa_key.p8 -nocrypt
+
+# Extract public key
+openssl rsa -in hex_rsa_key.p8 -pubout -out hex_rsa_key.pub
+```
+
+Then assign the public key to the Snowflake user:
+
+```sql
+ALTER USER HEX SET RSA_PUBLIC_KEY = '<contents of hex_rsa_key.pub, without BEGIN/END lines>';
+```
+
+Upload `hex_rsa_key.p8` to Hex's Snowflake connection settings.
+
+### Usage in Hex
+
+Each mart is designed to be consumed with a simple `SELECT *`. No joins, aggregations, or gap-filling needed:
+
+```sql
+-- Example Hex SQL cells
+SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_TICKET_MIX;
+SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_AGENT_THROUGHPUT;
+SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_SLA_COMPLIANCE;
+```
+
+For filtering (e.g., specific date range or agent), add a WHERE clause in the Hex cell:
+
+```sql
+SELECT * FROM DEV_MARTS.IT_HELPDESK.MART_AGENT_THROUGHPUT
+WHERE week_start >= '2020-01-01';
+```
+
+---
+
+## Design Decisions: Mart Layer
+
+| Decision | Rationale |
+|----------|-----------|
+| One model per KPI | Each mart answers one business question — easy to reason about, test, and document |
+| Pre-aggregated grain | Hex consumers do `SELECT *` and chart — no SQL expertise required |
+| Dense time-series (date spine) | Eliminates gaps in line/area charts without requiring Hex-side pandas transforms |
+| NULL percentages for empty periods | Avoids misleading 0% or 100% when there's no data — Hex chart libraries skip NULLs gracefully |
+| Separate intermediate layer | `int_date_spine` is reusable across all time-series marts; materialized as a view (no storage cost) |
+| Dedicated Hex warehouse | Isolates BI query cost from dbt build cost; makes cost attribution straightforward |
+| Read-only Hex role | Principle of least privilege — Hex can never modify mart data |

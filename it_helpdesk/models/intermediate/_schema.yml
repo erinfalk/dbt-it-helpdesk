@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: int_date_spine
+    description: >
+      Complete series of ISO weeks from min to max ticket_date.
+      Used by time-series marts for zero-filled dense output.
+      Dynamic: extends automatically as new data arrives.
+    columns:
+      - name: week_start
+        description: "Monday of each ISO week in the data range"
+        tests:
+          - unique
+          - not_null
+      - name: month_start
+        description: "First day of the month containing this week_start"
+        tests:
+          - not_null

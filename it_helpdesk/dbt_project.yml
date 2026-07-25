@@ -12,7 +12,21 @@ models:
       +database: DEV_STAGE
       +schema: IT_HELPDESK
       +materialized: view
+    intermediate:
+      +database: DEV_STAGE
+      +schema: IT_HELPDESK
+      +materialized: view
+    dims:
+      +database: DEV_MARTS
+      +schema: IT_HELPDESK
+      +materialized: table
+      +persist_docs:
+        relation: true
+        columns: true
     marts:
       +database: DEV_MARTS
       +schema: IT_HELPDESK
       +materialized: table
+      +persist_docs:
+        relation: true
+        columns: true

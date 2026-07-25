@@ -1,0 +1,266 @@
+version: 2
+
+models:
+  - name: mart_ticket_mix
+    description: >
+      Ticket volume cross-tabulated by severity and priority with canonical display labels.
+      Grain: one row per (severity, priority, is_resolved) combination.
+      Use for heatmaps showing workload risk profile.
+    columns:
+      - name: severity
+        description: "Corrected severity display label (Unclassified, Minor, Normal, Major, Urgent)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
+      - name: severity_tier
+        description: "Business-approved tier: Unknown, Low, Medium, High, Critical"
+        tests:
+          - accepted_values:
+              values: ['Unknown', 'Low', 'Medium', 'High', 'Critical']
+      - name: severity_sort
+        description: "Numeric sort key (0–4) for ordering severity in charts"
+        tests:
+          - not_null
+      - name: priority
+        description: "Corrected priority display label (Unassigned, Low, Medium, High)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unassigned', 'Low', 'Medium', 'High']
+      - name: priority_code
+        description: "Priority code: P1 (high), P2 (medium), P3 (low), P4 (unassigned)"
+        tests:
+          - accepted_values:
+              values: ['P1', 'P2', 'P3', 'P4']
+      - name: priority_tier
+        description: "Business-approved tier: Unassigned, Low, Medium, High"
+        tests:
+          - accepted_values:
+              values: ['Unassigned', 'Low', 'Medium', 'High']
+      - name: priority_sort
+        description: "Numeric sort key (0–3) for ordering priority in charts"
+        tests:
+          - not_null
+      - name: is_resolved
+        description: "TRUE if ticket has been resolved (resolution_days IS NOT NULL), FALSE if open"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: ticket_count
+        description: "Number of tickets in this combination"
+        tests:
+          - not_null
+      - name: pct_of_total
+        description: "Percentage of all tickets falling into this combination"
+
+  - name: mart_agent_throughput
+    description: >
+      Weekly resolved-ticket count per support agent. Dense: every agent has a row
+      for every week in the data range (zero-filled). Grain: (agent_id, week_start).
+      Assumption: resolved = resolution_days IS NOT NULL.
+    columns:
+      - name: agent_id
+        description: "Agent identifier (FK to stg_agents)"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_agents')
+              field: agent_id
+              severity: warn
+      - name: agent_name
+        description: "Agent full name derived from email"
+        tests:
+          - not_null
+      - name: week_start
+        description: "Monday of the ISO week"
+        tests:
+          - not_null
+      - name: tickets_resolved
+        description: "Count of tickets resolved that week (0 if none)"
+        tests:
+          - not_null
+
+  - name: mart_resolution_time
+    description: >
+      Resolution time statistics by issue type and request category (two-level hierarchy).
+      Grain: one row per (issue_type, request_category).
+      Only resolved tickets included. Median is the primary metric (right-skew resistant).
+      resolution_days = calendar days, not business days.
+    columns:
+      - name: issue_type
+        description: "Top-level category: IT Request, IT Error"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['IT Request', 'IT Error']
+      - name: request_category
+        description: "Sub-category: System, Hardware, Login Access, Software"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['System', 'Hardware', 'Login Access', 'Software']
+      - name: tickets_resolved
+        description: "Total resolved tickets for this type/category"
+        tests:
+          - not_null
+      - name: median_resolution_days
+        description: "Median calendar days to resolve"
+      - name: avg_resolution_days
+        description: "Mean calendar days to resolve"
+      - name: p75_resolution_days
+        description: "75th percentile resolution days"
+      - name: p95_resolution_days
+        description: "95th percentile resolution days"
+      - name: min_resolution_days
+        description: "Fastest resolution (days)"
+      - name: max_resolution_days
+        description: "Slowest resolution (days)"
+
+  - name: mart_sla_compliance
+    description: >
+      SLA compliance rate per issue type per month. Dense: every issue type has a row
+      for every month (zero-filled). SLA definition: resolved within <= 3 calendar days.
+      Grain: (issue_type, month_start).
+    columns:
+      - name: issue_type
+        description: "Issue category"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['IT Request', 'IT Error']
+      - name: month_start
+        description: "First day of calendar month"
+        tests:
+          - not_null
+      - name: sla_target_days
+        description: "SLA threshold in calendar days (always 3). Exposed for downstream parameterization."
+        tests:
+          - not_null
+          - accepted_values:
+              values: [3]
+      - name: resolved_ticket_count
+        description: "Total resolved tickets in this issue_type/month"
+        tests:
+          - not_null
+      - name: tickets_within_sla
+        description: "Tickets resolved in <= 3 calendar days (boundary-inclusive: exactly 3 days = compliant)"
+        tests:
+          - not_null
+      - name: tickets_breached_sla
+        description: "Tickets resolved in > 3 calendar days"
+        tests:
+          - not_null
+      - name: sla_compliance_pct
+        description: "tickets_within_sla / resolved_ticket_count * 100. NULL when no resolved tickets."
+      - name: weighted_sla_compliance_pct
+        description: >
+          Contribution of this issue_type's compliant tickets to the overall monthly compliance.
+          Sum across issue types for a given month = overall monthly SLA compliance %.
+
+  - name: mart_csat_by_category
+    description: >
+      Average customer satisfaction (1–5 scale) by request category.
+      Grain: one row per request_category. All-time aggregate.
+      Promoter = 4 or 5, Detractor = 1 or 2, Neutral = 3.
+    columns:
+      - name: request_category
+        description: "Request category (System, Hardware, Login Access, Software)"
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['System', 'Hardware', 'Login Access', 'Software']
+      - name: responses
+        description: "Number of tickets with a satisfaction rating"
+        tests:
+          - not_null
+      - name: avg_csat
+        description: "Mean satisfaction_rate (1–5)"
+      - name: promoters
+        description: "Count of ratings >= 4"
+      - name: detractors
+        description: "Count of ratings <= 2"
+      - name: pct_promoters
+        description: "Percentage of respondents scoring 4 or 5"
+
+  - name: mart_backlog_trend
+    description: >
+      Weekly opened vs resolved tickets by severity, with cumulative backlog.
+      Dense: every severity has a row for every week (zero-filled).
+      Grain: (week_start, severity).
+      Note: both opened/resolved attributed to ticket_date (open date), not closure date.
+    columns:
+      - name: week_start
+        description: "Monday of the ISO week"
+        tests:
+          - not_null
+      - name: severity
+        description: "Corrected severity display label (Unclassified, Minor, Normal, Major, Urgent)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
+      - name: severity_tier
+        description: "Business-approved tier: Unknown, Low, Medium, High, Critical"
+      - name: severity_sort
+        description: "Numeric sort key (0–4) for ordering"
+        tests:
+          - not_null
+      - name: tickets_opened
+        description: "Tickets opened that week (0 if none)"
+        tests:
+          - not_null
+      - name: tickets_resolved
+        description: "Tickets resolved that week (0 if none)"
+        tests:
+          - not_null
+      - name: net_new_backlog
+        description: "opened - resolved for the week (positive = growing backlog)"
+        tests:
+          - not_null
+      - name: cumulative_backlog
+        description: "Running sum of net_new_backlog within each severity. Can be negative (team catching up)."
+
+  - name: mart_first_week_resolution_rate
+    description: >
+      Monthly percentage of tickets resolved within 7 calendar days.
+      Dense: every month in the data range has a row (zero-filled).
+      Grain: one row per month_start.
+    columns:
+      - name: month_start
+        description: "First day of the calendar month"
+        tests:
+          - unique
+          - not_null
+      - name: total_resolved
+        description: "All resolved tickets in that month"
+        tests:
+          - not_null
+      - name: resolved_within_7_days
+        description: "Tickets resolved in <= 7 calendar days"
+        tests:
+          - not_null
+      - name: first_week_resolution_pct
+        description: "Percentage resolved within 7 days. NULL if total_resolved = 0."
+
+exposures:
+  - name: it_helpdesk_operations_dashboard
+    type: dashboard
+    maturity: medium
+    description: >
+      IT Helpdesk Operations Dashboard in Hex. Visualizes ticket mix, agent throughput,
+      resolution times, SLA compliance, CSAT, backlog trends, and first-week resolution rate.
+      Connected via HEX_READER role on DEV_MARTS.IT_HELPDESK.
+    depends_on:
+      - ref('mart_ticket_mix')
+      - ref('mart_agent_throughput')
+      - ref('mart_resolution_time')
+      - ref('mart_sla_compliance')
+      - ref('mart_csat_by_category')
+      - ref('mart_backlog_trend')
+      - ref('mart_first_week_resolution_rate')
+    owner:
+      name: IT Helpdesk Analytics
+      email: helpdesk-analytics@fp20analytics.com
