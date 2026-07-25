@@ -1,0 +1,21 @@
+it_helpdesk:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: ""
+      user: ""
+      role: DBT_DEVELOPER
+      database: DEV_STAGE
+      warehouse: DBT_DEVELOPMENT_WH
+      schema: IT_HELPDESK
+      threads: 8
+    prod:
+      type: snowflake
+      account: ""
+      user: ""
+      role: DBT_SERVICE
+      database: DEV_STAGE
+      warehouse: COMPUTE_WH
+      schema: IT_HELPDESK
+      threads: 8

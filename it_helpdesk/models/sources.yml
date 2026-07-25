@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: it_helpdesk
+    database: DEV_SOURCE
+    schema: IT_HELPDESK
+    tables:
+      - name: tickets
+      - name: agents
