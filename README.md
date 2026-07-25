@@ -27,7 +27,7 @@ Data flows staging (light typing/renaming) → canonical dims (severity/priority
 
 Each of the four roles involved (Fivetran, dbt dev, dbt scheduled runs, Hex) gets its own Snowflake role/warehouse for least-privilege access and clean cost isolation.
 
-Full layer-by-layer breakdown, column-level docs, and design rationale: **[detailed_project_setup_guide.md](detailed_project_setup_guide.md)**.
+Full layer-by-layer breakdown, column-level docs, and design rationale: **[dbt_project_setup_guide.md](dbt_project_setup_guide.md)**.
 
 ## Setup Steps
 
@@ -83,12 +83,13 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 1. Set up prod schemas and a proper deployment process in Snowflake/dbt (separate from the dev setup in `Setup.sql`).
 2. Schedule the dbt job to run on a frequency aligned with how often the source data actually updates.
 3. Move to schema-level role-based access control — read/write access roles per schema, granted to functional roles/service accounts, rather than grants sitting directly on users/accounts.
+4. Exclude agent date of birth from the Fivetran sync entirely. It's PII, and it isn't required or relevant for operational analysis of the helpdesk — in a real setting we'd want to avoid pulling it into the warehouse in the first place rather than relying on downstream access controls to protect it.
 
 **Business/process:**
 
-4. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
-5. Revisit the SLA policy with severity-differentiated targets — Minor-severity tickets currently show *higher* SLA compliance than Urgent ones, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
-6. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
+5. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
+6. Revisit the SLA policy with severity-differentiated targets — Minor-severity tickets currently show *higher* SLA compliance than Urgent ones, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
+7. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
 
 ## Hours Spent
 
@@ -104,4 +105,4 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 
 - `it_helpdesk/` — the dbt project (models, macros, config)
 - `Setup.sql` — all Snowflake setup commands, in order
-- `detailed_project_setup_guide.md` — full technical reference: column-level KPI docs, canonical dimension mappings, Hex connection details, and design-decision rationale
+- `dbt_project_setup_guide.md` — full technical reference: column-level KPI docs, canonical dimension mappings, Hex connection details, and design-decision rationale
