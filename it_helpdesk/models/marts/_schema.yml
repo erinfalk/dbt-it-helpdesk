@@ -185,44 +185,6 @@ models:
       - name: pct_promoters
         description: "Percentage of respondents scoring 4 or 5"
 
-  - name: mart_backlog_trend
-    description: >
-      Weekly opened vs resolved tickets by severity, with cumulative backlog.
-      Dense: every severity has a row for every week (zero-filled).
-      Grain: (week_start, severity).
-      Note: both opened/resolved attributed to ticket_date (open date), not closure date.
-    columns:
-      - name: week_start
-        description: "Monday of the ISO week"
-        tests:
-          - not_null
-      - name: severity
-        description: "Corrected severity display label (Unclassified, Minor, Normal, Major, Urgent)"
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['Unclassified', 'Minor', 'Normal', 'Major', 'Urgent']
-      - name: severity_tier
-        description: "Business-approved tier: Unknown, Low, Medium, High, Critical"
-      - name: severity_sort
-        description: "Numeric sort key (0–4) for ordering"
-        tests:
-          - not_null
-      - name: tickets_opened
-        description: "Tickets opened that week (0 if none)"
-        tests:
-          - not_null
-      - name: tickets_resolved
-        description: "Tickets resolved that week (0 if none)"
-        tests:
-          - not_null
-      - name: net_new_backlog
-        description: "opened - resolved for the week (positive = growing backlog)"
-        tests:
-          - not_null
-      - name: cumulative_backlog
-        description: "Running sum of net_new_backlog within each severity. Can be negative (team catching up)."
-
   - name: mart_first_week_resolution_rate
     description: >
       Monthly percentage of tickets resolved within 7 calendar days.
@@ -251,7 +213,7 @@ exposures:
     maturity: medium
     description: >
       IT Helpdesk Operations Dashboard in Hex. Visualizes ticket mix, agent throughput,
-      resolution times, SLA compliance, CSAT, backlog trends, and first-week resolution rate.
+      resolution times, SLA compliance, CSAT, and first-week resolution rate.
       Connected via HEX_READER role on DEV_MARTS.IT_HELPDESK.
     depends_on:
       - ref('mart_ticket_mix')
@@ -259,7 +221,6 @@ exposures:
       - ref('mart_resolution_time')
       - ref('mart_sla_compliance')
       - ref('mart_csat_by_category')
-      - ref('mart_backlog_trend')
       - ref('mart_first_week_resolution_rate')
     owner:
       name: IT Helpdesk Analytics
