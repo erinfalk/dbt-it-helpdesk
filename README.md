@@ -54,7 +54,7 @@ Across the full dataset (Dec 2015 – Nov 2020): **97.5K resolved tickets**, **5
 | KPI | Model | Definition | Headline result |
 |-----|-------|------------|------------------|
 | Ticket mix by severity & priority | `mart_ticket_mix` | Workload risk profile across severity × priority × resolution status | "Normal" severity dominates volume (~88.6K of 97.5K); Urgent/P1 tickets are a small slice (612) |
-| Tickets resolved per agent per week | `mart_agent_throughput` | Weekly per-agent throughput, zero-filled via a date spine | Throughput is highly consistent across the team — top agent averages 7.74 tickets/week, and even the lowest-ranked agent still closes ~7.08/week |
+| Tickets resolved per agent per week | `mart_agent_throughput` | Weekly per-agent throughput, zero-filled via a date spine | Throughput is highly consistent across the team — top agent averages 7.68 tickets/week, and even the lowest-ranked agent still closes ~7.03/week |
 | Median resolution time by issue type | `mart_resolution_time` | Median/p75/p95 calendar days to resolve, by issue type × category | Hardware (IT Request) is slowest at a 9-day median; Login Access resolves same-day (0-day median) for both issue types |
 | SLA compliance rate (≤ 3 days) | `mart_sla_compliance` | % resolved within 3 calendar days, by month/category/severity | **48.2% overall** (47K within SLA, 50.5K breached) — consistent with several categories having medians above the 3-day target, not a data issue |
 
@@ -65,12 +65,10 @@ Across the full dataset (Dec 2015 – Nov 2020): **97.5K resolved tickets**, **5
 | CSAT by request category | `mart_csat_by_category` | Average satisfaction score and promoter/detractor split per category | 4.10/5 overall, tightly clustered (4.09–4.11) across categories — presented as an overall metric rather than a category comparison since the spread isn't meaningful |
 | First-week resolution rate | `mart_first_week_resolution_rate` | % resolved within 7 calendar days, by month/category/severity | 77.0% overall (75.1K of 97.5K), stable month over month |
 
-*(A backlog-trend KPI was explored and removed — see "Backlog Trend (Not Included)" in the setup guide for why.)*
-
 ### Notable Patterns
 
 - **SLA compliance is low, but satisfaction isn't.** Only 48.2% of tickets are resolved within the 3-day SLA, yet overall CSAT sits at 4.10/5. Resolution speed and satisfaction aren't tightly coupled here — worth digging into further (e.g., whether users rate based on outcome quality rather than speed) before treating SLA as the primary lever for satisfaction.
-- **Agent productivity is remarkably consistent.** Weekly throughput ranges narrowly from ~7.08 (lowest-ranked agent) to 7.74 tickets/week (top agent) across all 50 agents — no clear outliers or underperformers, suggesting ticket assignment/workload is well-balanced rather than concentrated on a few agents.
+- **Agent productivity is remarkably consistent.** Weekly throughput ranges narrowly from ~7.03 (lowest-ranked agent) to 7.68 tickets/week (top agent) across all 50 agents — no clear outliers or underperformers, suggesting ticket assignment/workload is well-balanced rather than concentrated on a few agents.
 
 ## Data Quality
 
@@ -88,7 +86,7 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 **Business/process:**
 
 5. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
-6. Revisit the SLA policy with severity-differentiated targets — Minor-severity tickets currently show *higher* SLA compliance than Urgent ones, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
+6. Revisit the SLA policy with severity-differentiated targets — SLA compliance for low-severity tickets is consistently higher than for medium and high severity, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
 7. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
 
 ## Hours Spent

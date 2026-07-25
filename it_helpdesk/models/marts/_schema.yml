@@ -61,6 +61,7 @@ models:
     description: >
       Weekly resolved-ticket count per agent. Dense (zero-filled).
       Grain: (agent_id, week_start).
+      Resolution attributed to closure week (ticket_date + resolution_days).
     tests:
       - unique:
           column_name: "agent_id || '|' || week_start"

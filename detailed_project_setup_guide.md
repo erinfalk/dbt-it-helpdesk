@@ -207,7 +207,7 @@ Tests run at the layer where a problem is cheapest to catch: raw label typos and
 | `tickets_resolved` | Count resolved that week (0 if none) |
 
 **Grain:** One row per (agent, week). Dense — every agent has a row for every week.
-**Assumptions:** Week assigned by `ticket_date` (open date), not actual closure date.
+**Assumptions:** Resolution attributed to closure week (`ticket_date + resolution_days`), not the open date.
 
 ---
 
@@ -366,35 +366,30 @@ A shareable Hex Generative app was built on top of the dbt marts, published for 
 - Percentages are calculated in Hex from additive ticket counts within the active filter context.
 
 **2. Tickets resolved per agent**
-- Weekly agent throughput at the agent_id × week_start grain.
+- Weekly agent throughput at the agent_id × week_start grain (attributed to closure week).
 - Agents ranked highest to lowest by total tickets resolved across the full period.
 - Total resolved, rank, and weekly averages are presentation-level aggregations calculated in the notebook.
-- Throughput is highly consistent across the team: weekly average ranges narrowly from ~7.08 (lowest-ranked agent) to 7.74 (top agent) tickets/week — no clear outliers, suggesting balanced ticket assignment rather than a few agents carrying disproportionate load.
 
 **3. Resolution time by issue type and request category**
 - Uses the issue_type × request_category grain (8 rows).
 - Median is the primary measure (right-skew resistant). P75 and P95 show the slower tail.
-- Hardware requests are the slowest category in the current data (9-day median for IT Request); Login Access resolves same-day (0-day median) for both issue types.
 
 **4. SLA compliance**
 - Defined as resolved within 3 calendar days (boundary-inclusive: exactly 3 days = compliant).
 - Hex calculates: `100 * SUM(tickets_within_sla) / SUM(resolved_ticket_count)`.
 - Default view: overall monthly trend. Optional breakouts by request category and severity.
 - Category identifies work types causing breaches; severity shows whether high-risk tickets receive appropriate service.
-- Overall compliance is 48.2% — notably low against a nominally aggressive 3-day target, and worth reading alongside CSAT below: satisfaction stays high despite this.
 
 **5. Customer satisfaction**
 - Overall CSAT: `SUM(csat_points_sum) / SUM(responses)`.
 - Share rating 4–5: `100 * SUM(promoters) / SUM(responses)`.
-- CSAT averages vary only 4.09–4.11 across request categories (differences negligible), so CSAT is presented as an overall outcome KPI rather than a category comparison.
+- CSAT averages vary negligibly across request categories, so CSAT is presented as an overall outcome KPI rather than a category comparison.
 - Response count retained to communicate sample size.
-- Notable: overall CSAT (4.10/5) stays high despite the 48.2% SLA compliance rate — resolution speed and satisfaction don't appear tightly coupled in this data, suggesting SLA breach alone isn't the main driver of user sentiment here. Worth further investigation before treating SLA as the primary lever for satisfaction.
 
 **6. First-week resolution**
 - Defined as resolved within 7 calendar days.
 - Hex calculates: `100 * SUM(resolved_within_7_days) / SUM(total_resolved)`.
 - Default view: overall monthly trend. Request-category breakout is the more diagnostic dimension (reveals structural complexity differences). Severity breakout also available.
-- Overall rate is stable (~75.8%–79.0%) — main value is monitoring consistency and detecting future deviations.
 
 ### Dashboard Design Principles
 
@@ -402,10 +397,6 @@ A shareable Hex Generative app was built on top of the dbt marts, published for 
 - All rates calculated from additive counts in Hex, ensuring correct totals under any filter combination.
 - Labels, units, tooltips, and calendar-day definitions retained where they help interpretation.
 - Canonical display labels, P-codes, tiers, and sort keys come from dbt (stable business definitions, not presentation logic).
-
-### Backlog Trend (Not Included)
-
-Explored but not added. The mart's logic attributed both opened and resolved tickets to the opening date, making net/cumulative backlog always zero. A useful backlog model would require closure-week attribution or periodic open-ticket snapshots. The mart was removed from dbt.
 
 ---
 

@@ -1,5 +1,6 @@
 -- KPI: Tickets resolved per agent per week — individual throughput
 -- Dense: every agent gets a row for every week (zero-filled)
+-- Resolution attributed to CLOSURE week (ticket_date + resolution_days), not open date
 with spine as (
     select distinct week_start from {{ ref('int_date_spine') }}
 ),
@@ -20,7 +21,7 @@ agent_weeks as (
 actuals as (
     select
         agent_id,
-        date_trunc('week', ticket_date)::date as week_start,
+        date_trunc('week', dateadd('day', resolution_days, ticket_date))::date as week_start,
         count(*) as tickets_resolved
     from {{ ref('stg_tickets') }}
     where resolution_days is not null
