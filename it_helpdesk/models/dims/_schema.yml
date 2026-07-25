@@ -1,0 +1,62 @@
+version: 2
+
+models:
+  - name: dim_severity
+    description: >
+      Canonical severity dimension. One row per distinct severity level.
+      Preserves raw labels from source (with typos), adds corrected display labels
+      and business-approved tier mapping.
+    columns:
+      - name: sort_key
+        description: "Numeric severity level (0–4) for ordering"
+        tests:
+          - unique
+          - not_null
+      - name: raw_label
+        description: "Original label from source (typos preserved: Unclasified, Mayor)"
+        tests:
+          - unique
+          - not_null
+      - name: display_label
+        description: "Corrected label for UI display (Unclassified, Minor, Normal, Major, Urgent)"
+        tests:
+          - not_null
+      - name: business_tier
+        description: "Business-approved tier: Unknown, Low, Medium, High, Critical"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unknown', 'Low', 'Medium', 'High', 'Critical']
+
+  - name: dim_priority
+    description: >
+      Canonical priority dimension. One row per distinct priority level.
+      Preserves raw labels, adds corrected display labels, ITIL P-codes,
+      and business-approved tier mapping.
+    columns:
+      - name: sort_key
+        description: "Numeric priority level (0–3) for ordering"
+        tests:
+          - unique
+          - not_null
+      - name: raw_label
+        description: "Original label from source (typos preserved: Unassiged, Mid)"
+        tests:
+          - unique
+          - not_null
+      - name: display_label
+        description: "Corrected label for UI display (Unassigned, Low, Medium, High)"
+        tests:
+          - not_null
+      - name: p_code
+        description: "Priority code: P1 (high), P2 (medium), P3 (low), P4 (unassigned)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['P1', 'P2', 'P3', 'P4']
+      - name: business_tier
+        description: "Business-approved tier: Unassigned, Low, Medium, High"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Unassigned', 'Low', 'Medium', 'High']
