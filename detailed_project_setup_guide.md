@@ -1,4 +1,4 @@
-# IT Helpdesk End-to-End Project Setup Guide
+# IT Helpdesk Analytics - Detailed End-to-End Project Setup Guide
 
 ## Architecture Overview
 
@@ -43,21 +43,11 @@ Key decisions:
 
 Creates the target databases (`DEV_STAGE`, `DEV_MARTS`), roles, and grants. The `DBT_DEVELOPER` role has full schema-level access to both targets; `DBT_SERVICE` mirrors this for production.
 
----
-
-## Step 3: GitHub Integration
-
-**See:** `Setup.sql` → Section 4
-
-Uses Snowflake's native GitHub App integration for Snowsight Workspaces. After creating the API integration:
-1. Go to **Projects > Workspaces**
-2. Click **+ > From Git repository**
-3. Paste your repo URL
-4. Select `GIT_API_INTEGRATION` and authenticate
+*(Optional dev convenience, not required for the pipeline itself: Snowflake's native GitHub App integration lets you browse/run this repo directly from Snowsight Workspaces — `Setup.sql` Section 4 has the one-time API integration setup.)*
 
 ---
 
-## Step 4: dbt Project Structure
+## Step 3: dbt Project Structure
 
 ### File Structure
 
@@ -111,6 +101,7 @@ it_helpdesk/
 - **`persist_docs`** enabled on `dims/` and `marts/` — model and column descriptions from `_schema.yml` are written as Snowflake `COMMENT` metadata, visible in Hex's schema browser
 - **Source freshness** — `sources.yml` defines `warn_after: 24h`, `error_after: 72h` on `_fivetran_synced`
 - **dbt exposure** — `it_helpdesk_operations_dashboard` declared in `marts/_schema.yml` tracks the Hex dependency
+- **`generate_schema_name` macro** — overridden so custom schemas (`DEV_STAGE`, `DEV_MARTS`) are used exactly as configured, without dbt's default `<target>_<custom_schema>` prefixing
 
 ---
 
@@ -143,6 +134,25 @@ Maps raw source priority labels to clean display labels, P-codes, and business t
 - Raw labels preserved in dims for traceability but **never exposed in marts**
 - Marts only show `display_label` (as `severity`/`priority`), `business_tier`, `p_code`, and `sort_key`
 - P-codes: P1 = highest priority, P4 = lowest (unassigned)
+
+---
+
+## Testing Strategy
+
+Beyond standard dbt tests (`unique`, `not_null`, `accepted_values`, `relationships`), the project defines custom generic tests in `macros/` for checks that come up more than once:
+
+| Test | Checks | Used on |
+|------|--------|---------|
+| `non_negative` | Column value is not < 0 | `resolution_days`, all mart count/sum measures |
+| `not_in_future` | Date column is not after `current_date()` | `ticket_date` |
+| `numerator_lte_denominator` | One column doesn't exceed another (e.g. a rate's numerator vs. denominator) | SLA/first-week/CSAT numerator columns against their denominators |
+| `valid_level_label_pairs` | A numeric level and its text label always co-occur as one of a fixed set of pairs (catches new/unexpected raw label variants) | `stg_tickets.priority_label`, `stg_tickets.severity_label` |
+| `matches_email_format` | Column matches `firstname.lastname@<domain>` | `stg_agents.email` |
+| `valid_date_of_birth` | `year_of_birth`/`month_of_birth`/`day_of_birth` combine into a real calendar date | `stg_agents` |
+
+Tests run at the layer where a problem is cheapest to catch: raw label typos and malformed fields are caught in staging (before they can propagate), and rate-consistency checks (numerator ≤ denominator) run in the marts where those rates are computed.
+
+> Note: `valid_date_of_birth` is attached to the `agent_id` column rather than one of the birth-date columns. This is deliberate: the macro's failing-rows query selects whatever column it's attached to, so attaching it to `agent_id` means a test failure surfaces *which agent* has the malformed birthdate — the actionable info for troubleshooting — rather than just an orphaned year/month/day value with no way to trace it back to a specific record.
 
 ---
 
@@ -301,7 +311,7 @@ The spine is dynamic — extends automatically as new ticket data arrives.
 
 | Setting | Value |
 |---------|-------|
-| Account | `ztc28823` |
+| Account | `<your_account_locator>` |
 | Username | `HEX` (service user, key-pair auth) |
 | Role | `HEX_READER` |
 | Warehouse | `HEX_WH` (XS, auto-suspend 60s) |
@@ -310,13 +320,7 @@ The spine is dynamic — extends automatically as new ticket data arrives.
 
 ### Key-Pair Generation
 
-```bash
-# Run on your local machine (NOT in Snowflake)
-openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out hex_rsa_key.p8 -nocrypt
-openssl rsa -in hex_rsa_key.p8 -pubout -out hex_rsa_key.pub
-```
-
-Then apply via `Setup.sql` Section 5d. Upload `hex_rsa_key.p8` to Hex's connection settings.
+Key pair is generated locally (not in Snowflake) and applied via `Setup.sql` Section 5d — see the inline comment there for the exact `openssl` commands. Upload `hex_rsa_key.p8` to Hex's connection settings.
 
 ### Usage in Hex
 
@@ -352,7 +356,7 @@ Use Hex input parameters (dropdowns) bound to `WHERE` clauses for interactive fi
 
 ## Hex Dashboard: IT Helpdesk Operations
 
-A shareable Hex Generative app was built on top of the dbt marts. It is currently an unpublished draft pending final review and publishing permissions.
+A shareable Hex Generative app was built on top of the dbt marts, published for public viewing (see the link at the top of the README).
 
 ### KPI Views
 
@@ -365,23 +369,26 @@ A shareable Hex Generative app was built on top of the dbt marts. It is currentl
 - Weekly agent throughput at the agent_id × week_start grain.
 - Agents ranked highest to lowest by total tickets resolved across the full period.
 - Total resolved, rank, and weekly averages are presentation-level aggregations calculated in the notebook.
+- Throughput is highly consistent across the team: weekly average ranges narrowly from ~7.08 (lowest-ranked agent) to 7.74 (top agent) tickets/week — no clear outliers, suggesting balanced ticket assignment rather than a few agents carrying disproportionate load.
 
 **3. Resolution time by issue type and request category**
 - Uses the issue_type × request_category grain (8 rows).
 - Median is the primary measure (right-skew resistant). P75 and P95 show the slower tail.
-- Hardware requests are the slowest category in the current data.
+- Hardware requests are the slowest category in the current data (9-day median for IT Request); Login Access resolves same-day (0-day median) for both issue types.
 
 **4. SLA compliance**
 - Defined as resolved within 3 calendar days (boundary-inclusive: exactly 3 days = compliant).
 - Hex calculates: `100 * SUM(tickets_within_sla) / SUM(resolved_ticket_count)`.
 - Default view: overall monthly trend. Optional breakouts by request category and severity.
 - Category identifies work types causing breaches; severity shows whether high-risk tickets receive appropriate service.
+- Overall compliance is 48.2% — notably low against a nominally aggressive 3-day target, and worth reading alongside CSAT below: satisfaction stays high despite this.
 
 **5. Customer satisfaction**
 - Overall CSAT: `SUM(csat_points_sum) / SUM(responses)`.
 - Share rating 4–5: `100 * SUM(promoters) / SUM(responses)`.
 - CSAT averages vary only 4.09–4.11 across request categories (differences negligible), so CSAT is presented as an overall outcome KPI rather than a category comparison.
 - Response count retained to communicate sample size.
+- Notable: overall CSAT (4.10/5) stays high despite the 48.2% SLA compliance rate — resolution speed and satisfaction don't appear tightly coupled in this data, suggesting SLA breach alone isn't the main driver of user sentiment here. Worth further investigation before treating SLA as the primary lever for satisfaction.
 
 **6. First-week resolution**
 - Defined as resolved within 7 calendar days.
@@ -404,17 +411,10 @@ Explored but not added. The mart's logic attributed both opened and resolved tic
 
 ## Design Decisions
 
+Most design choices are explained in context above (canonical dims, testing, Hex integration). A few don't have an obvious home elsewhere:
+
 | Decision | Rationale |
 |----------|-----------|
 | One model per KPI | Each mart answers one business question — easy to reason about, test, and document |
-| Additive measures only | No pre-computed percentages — rates calculated downstream so filters/roll-ups are always correct |
 | Multi-dimensional grains | SLA and first-week marts sliceable by severity/category without re-querying staging |
-| Dense agent throughput | Date spine on the single agent×week mart; other marts don't need it (no expected gaps given their granularity) |
 | Percentiles not reaggregatable | Resolution time mart is consumed at grain only — noted in docs to prevent incorrect roll-ups |
-| Display labels only in marts | Raw source typos confined to staging/dims — consumers never see them |
-| Canonical dims as tables | Materialized for join performance; persist_docs makes mappings discoverable in Hex |
-| persist_docs enabled | Column descriptions visible in BI tool schema browsers without dbt project access |
-| Separate Hex warehouse | Isolates BI query cost from dbt build cost; straightforward chargeback |
-| Read-only Hex role | Principle of least privilege — Hex can never modify mart data |
-| Dedicated service users | Fivetran, dbt, and Hex each have their own user/role/warehouse for audit and isolation |
-| SQL in Setup.sql | Single executable reference file; docs cross-reference without bloat |
