@@ -1,9 +1,10 @@
 -- Generates a complete series of weeks and months spanning the ticket data range.
--- Used by time-series marts to ensure zero-filled dense output.
+-- Extends to cover the latest possible closure date (ticket_date + resolution_days)
+-- so that resolutions near the end of the data range aren't dropped.
 with date_bounds as (
     select
         date_trunc('week', min(ticket_date))::date as min_week,
-        date_trunc('week', max(ticket_date))::date as max_week
+        date_trunc('week', max(dateadd('day', resolution_days, ticket_date)))::date as max_week
     from {{ ref('stg_tickets') }}
 ),
 
