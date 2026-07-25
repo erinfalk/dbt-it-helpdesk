@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_agents
+    columns:
+      - name: agent_id
+        tests:
+          - unique
+          - not_null
+      - name: email
+        tests:
+          - matches_email_format:
+              domain: fp20analytics.com
+      - name: agent_id
+        tests:
+          - valid_date_of_birth
