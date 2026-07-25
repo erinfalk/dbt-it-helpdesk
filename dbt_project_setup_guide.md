@@ -68,10 +68,11 @@ it_helpdesk/
 ├── macros/
 │   ├── generate_schema_name.sql
 │   ├── test_matches_email_format.sql
-│   ├── test_valid_date_of_birth.sql
-│   ├── test_valid_level_label_pairs.sql
+│   ├── test_non_negative.sql
 │   ├── test_not_in_future.sql
-│   └── test_non_negative.sql
+│   ├── test_numerator_lte_denominator.sql
+│   ├── test_valid_date_of_birth.sql
+│   └── test_valid_level_label_pairs.sql
 └── models/
     ├── sources.yml
     ├── staging/
@@ -93,7 +94,6 @@ it_helpdesk/
         ├── mart_resolution_time.sql
         ├── mart_sla_compliance.sql
         ├── mart_csat_by_category.sql
-        ├── mart_backlog_trend.sql
         └── mart_first_week_resolution_rate.sql
 ```
 
@@ -104,7 +104,7 @@ it_helpdesk/
 | `staging/` | View | DEV_STAGE | Light renaming, type casting, no business logic |
 | `intermediate/` | View | DEV_STAGE | Reusable utilities (date spine) — not consumer-facing |
 | `dims/` | Table | DEV_MARTS | Canonical dimensions with corrected labels and business mappings |
-| `marts/` | Table | DEV_MARTS | Pre-aggregated KPI tables, one per business question |
+| `marts/` | Table | DEV_MARTS | KPI tables with additive measures (counts/sums only, no pre-computed rates) |
 
 ### Key dbt Configuration
 
