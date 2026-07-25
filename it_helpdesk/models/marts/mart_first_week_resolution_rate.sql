@@ -1,26 +1,28 @@
--- KPI: % of tickets resolved within 7 days — fast-turnaround rate by month
--- Dense: every month in the data range gets a row (zero-filled)
-with spine as (
-    select distinct month_start from {{ ref('int_date_spine') }}
+-- KPI: First-week resolution rate — % resolved within 7 calendar days
+-- Grain: month_start × request_category × severity_tier
+-- Additive: use SUM(resolved_within_7_days) / NULLIF(SUM(total_resolved), 0) to roll up
+with dim_sev as (
+    select * from {{ ref('dim_severity') }}
 ),
 
-actuals as (
+tickets as (
     select
-        date_trunc('month', ticket_date)::date as month_start,
-        count(*) as total_resolved,
-        count_if(resolution_days <= 7) as resolved_within_7_days
-    from {{ ref('stg_tickets') }}
-    where resolution_days is not null
-    group by 1
+        t.*,
+        ds.display_label as severity,
+        ds.business_tier as severity_tier,
+        ds.sort_key as severity_sort
+    from {{ ref('stg_tickets') }} t
+    left join dim_sev ds on t.severity_level = ds.sort_key
+    where t.resolution_days is not null
 )
 
 select
-    s.month_start,
-    coalesce(a.total_resolved, 0) as total_resolved,
-    coalesce(a.resolved_within_7_days, 0) as resolved_within_7_days,
-    case
-        when coalesce(a.total_resolved, 0) = 0 then null
-        else round(a.resolved_within_7_days * 100.0 / a.total_resolved, 2)
-    end as first_week_resolution_pct
-from spine s
-left join actuals a on s.month_start = a.month_start
+    date_trunc('month', ticket_date)::date as month_start,
+    request_category,
+    severity,
+    severity_tier,
+    severity_sort,
+    count(*) as total_resolved,
+    count_if(resolution_days <= 7) as resolved_within_7_days
+from tickets
+group by 1, 2, 3, 4, 5
