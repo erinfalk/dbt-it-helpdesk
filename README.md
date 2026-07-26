@@ -93,9 +93,9 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 
 **Business/process:**
 
-5. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
-6. Revisit the SLA policy with severity-differentiated targets — SLA compliance for low-severity tickets is consistently higher than for medium and high severity, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
-7. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
+6. Investigate what's driving the volume of Unassigned-priority / Unclassified-severity tickets, and consider adding a submission control on the helpdesk side so tickets can't go in without these fields set.
+7. Revisit the SLA policy with severity-differentiated targets — SLA compliance for low-severity tickets is consistently higher than for medium and high severity, which suggests a single flat 3-day SLA isn't helping agents prioritize the tickets that matter most.
+8. Consider morale-boosting incentives (team lunches, happy hours, etc.) tied to *positive* recognition rather than call-outs — e.g., a leaderboard/shoutout for agents with the most SLA-compliant closures (once SLA is realigned by severity) or the highest average CSAT, rather than one for lowest performers.
 
 ## Hours Spent
 
