@@ -166,7 +166,7 @@ Tests run at the layer where a problem is cheapest to catch: raw label typos and
 | **Week** | ISO week via `DATE_TRUNC('week', ticket_date)`. Week starts on Monday. |
 | **Month** | Calendar month via `DATE_TRUNC('month', ticket_date)`. |
 | **Date spine** | `mart_agent_throughput` is zero-filled via `int_date_spine`. Other marts are not spine-filled (their grains are multi-dimensional). |
-| **Date range** | Dynamically bounded by `MIN(ticket_date)` to `MAX(ticket_date)`. Currently 2016-01-01 through 2020-12-31. Auto-extends with new data. |
+| **Date range** | Spine bounded by `MIN(ticket_date)` to `MAX(ticket_date + resolution_days)` — covers the full range from earliest open to latest closure. Currently 2015-12-28 through 2021-01-11. Auto-extends with new data. |
 | **Labels in marts** | Only corrected display labels appear. Raw/misspelled source labels are confined to staging and dims. |
 | **Additive measures only** | Marts expose counts and sums only — no pre-computed percentages. Rates must be calculated downstream as `100 * SUM(numerator) / NULLIF(SUM(denominator), 0)`. This ensures correct results under any filter or roll-up. |
 
@@ -297,7 +297,7 @@ Tests run at the layer where a problem is cheapest to catch: raw label typos and
 
 ### int_date_spine
 
-Generates every ISO week from `MIN(ticket_date)` to `MAX(ticket_date)` using Snowflake's `ARRAY_GENERATE_RANGE`. Also derives `month_start`. Materialized as a view (no storage cost). Used by `mart_agent_throughput` for zero-filled dense output.
+Generates every ISO week from `MIN(ticket_date)` to `MAX(ticket_date + resolution_days)` using Snowflake's `ARRAY_GENERATE_RANGE`. The upper bound extends to the latest possible closure date so that resolutions near the end of the data range aren't dropped. Also derives `month_start`. Materialized as a view (no storage cost). Used by `mart_agent_throughput` for zero-filled dense output.
 
 The spine is dynamic — extends automatically as new ticket data arrives.
 

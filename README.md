@@ -15,6 +15,13 @@ An end-to-end pipeline that takes raw IT helpdesk ticket and agent data and turn
 | Transform | dbt |
 | Notebook/BI | Hex |
 
+## Tooling & Cost (Free!)
+
+- **dbt in Snowflake** — this project uses dbt within Snowflake (Snowsight Workspaces), not dbt Core or dbt Cloud. Models are developed and executed directly inside the Snowflake environment.
+- **Cortex Code (CoCo)** was the primary AI build agent for the dbt project — model authoring, testing, documentation, and iteration.
+- **Total hypothetical Snowflake cost** for the entire project (including all CoCo usage, dbt runs, and Hex queries during development) was **under $15**.
+- Free trials were used for **Snowflake, Hex, and Fivetran**.
+
 ## Architecture
 
 ```
@@ -42,7 +49,7 @@ Full layer-by-layer breakdown, column-level docs, and design rationale: **[dbt_p
 - **Week** — ISO week (`DATE_TRUNC('week', ticket_date)`), Monday start.
 - **Additive measures only** — marts expose counts/sums, not pre-computed rates, so any downstream filter or roll-up stays accurate.
 - **Raw label typos** (e.g. "Mayor" → Major, "Unclasified" → Unclassified, "Unassiged" → Unassigned, "Mid" → Medium) are corrected in canonical dims; only clean display labels ever reach the marts.
-- **Date range** is dynamic (`MIN`/`MAX(ticket_date)`), currently 2016-01-01 through 2020-12-31, and auto-extends as new data lands.
+- **Date range** is dynamic (bounded by `MIN(ticket_date)` to `MAX(ticket_date + resolution_days)`), currently 2015-12-28 through 2021-01-11, and auto-extends as new data lands.
 - Full assumption list (including the SLA/first-week windows below): see the setup guide.
 
 ## KPIs
@@ -82,6 +89,7 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 2. Schedule the dbt job to run on a frequency aligned with how often the source data actually updates.
 3. Move to schema-level role-based access control — read/write access roles per schema, granted to functional roles/service accounts, rather than grants sitting directly on users/accounts.
 4. Exclude agent date of birth from the Fivetran sync entirely. It's PII, and it isn't required or relevant for operational analysis of the helpdesk — in a real setting we'd want to avoid pulling it into the warehouse in the first place rather than relying on downstream access controls to protect it.
+5. Convert mart models to incremental materializations based on `source_load_timestamp` (`_fivetran_synced`) from the upstream sources. Data volume is currently low (~97.5K rows, full-refresh takes seconds), but at production scale this would avoid reprocessing the entire history on every run.
 
 **Business/process:**
 
@@ -91,13 +99,15 @@ dbt schema tests cover not-null, uniqueness at each mart's grain, accepted value
 
 ## Hours Spent
 
-**4.5 hours total**
+**5.5 hours total**
+
+This was my first time exploring Hex, and I got distracted by its cool features, so I probably spent too much time on that part. But I have no regrets because I got to learn a new tool.
 
 | Phase | Time |
 |-------|------|
 | Fivetran and Snowflake setup, source ingestion | 1 hour |
 | dbt project initialization, staging layer, and initial metric buildout | 1.5 hours |
-| Hex setup, initial buildout, iteration on metrics based on findings, finalizing dashboard | 2 hours |
+| Hex setup, initial buildout, iteration on metrics based on findings, finalizing dashboard | 3 hours |
 
 ## Repo Contents
 
