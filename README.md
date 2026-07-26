@@ -34,7 +34,7 @@ Data flows staging (light typing/renaming) → canonical dims (severity/priority
 
 Each of the four roles involved (Fivetran, dbt dev, dbt scheduled runs, Hex) gets its own Snowflake role/warehouse for least-privilege access and clean cost isolation.
 
-Full layer-by-layer breakdown, column-level docs, and design rationale: **[dbt_project_setup_guide.md](dbt_project_setup_guide.md)**.
+Full layer-by-layer breakdown, column-level docs, and design rationale: **[detailed_project_setup_guide.md](detailed_project_setup_guide.md)**.
 
 ## Setup Steps
 
@@ -113,4 +113,4 @@ This was my first time exploring Hex, and I got distracted by its cool features,
 
 - `it_helpdesk/` — the dbt project (models, macros, config)
 - `Setup.sql` — all Snowflake setup commands, in order
-- `dbt_project_setup_guide.md` — full technical reference: column-level KPI docs, canonical dimension mappings, Hex connection details, and design-decision rationale
+- `detailed_project_setup_guide.md` — full technical reference: column-level KPI docs, canonical dimension mappings, Hex connection details, and design-decision rationale
